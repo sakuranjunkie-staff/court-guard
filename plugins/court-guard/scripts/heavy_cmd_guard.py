@@ -55,7 +55,10 @@ def main():
             "permissionDecisionReason": msg,
         }
     }
-    sys.stdout.write(json.dumps(out, ensure_ascii=False))
+    # ensure_ascii=True: emit pure-ASCII JSON (\uXXXX) so the Japanese text
+    # survives regardless of the platform stdout encoding (Windows cp932 would
+    # otherwise mojibake it). The harness JSON-parses this back to real chars.
+    sys.stdout.write(json.dumps(out, ensure_ascii=True))
 
 
 try:

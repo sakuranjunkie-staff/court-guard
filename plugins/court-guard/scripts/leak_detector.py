@@ -47,7 +47,9 @@ def leak_hit(text, extra):
 
 
 def emit(obj):
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False))
+    # ensure_ascii=True: pure-ASCII JSON so Japanese survives any stdout
+    # encoding (Windows cp932 would mojibake it); harness parses it back.
+    sys.stdout.write(json.dumps(obj, ensure_ascii=True))
 
 
 def main():
