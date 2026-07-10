@@ -1,0 +1,11 @@
+{
+  "name": "court-guard",
+  "owner": { "name": "sakuranjunkie-staff" },
+  "plugins": [
+    {
+      "name": "court-guard",
+      "source": "./plugins/court-guard",
+      "description": "Mitigate, detect, and recover from the Opus 4.8 tool-call corruption (court/invoke leak). Not a cure."
+    }
+  ]
+}
