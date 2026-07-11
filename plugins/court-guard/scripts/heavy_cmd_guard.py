@@ -127,12 +127,14 @@ def main():
         )
     else:
         msg = (
-            "court-guard: %s in %s. Long tool arguments are the court-bug trigger. "
-            "This call ran, but keep the NEXT calls short: chunk long edits into "
-            "several small ones, pass long content by file reference instead of "
-            "generating it inline, keep Agent prompts brief. "
-            "/ 長い引数は court バグの引き金。この呼び出しは通したが、以後は短く"
-            "（編集は分割・長文はファイル参照・Agentのpromptは短く）。" % (reason, tool)
+            "court-guard: %s in %s. Long tool arguments are the court-bug trigger; "
+            "risk attaches to the length of ONE call, so split work into short calls. "
+            "This call ran, but keep the NEXT calls short: one job per command (no "
+            "long && chains; the working dir persists between calls), chunk long "
+            "edits, pass long content by file reference, keep Agent prompts brief. "
+            "/ 長い引数は court バグの引き金（リスクは1呼び出しの長さに付く）。以後は"
+            "短く割れ（一呼び出し一仕事・長い&&連結禁止・編集は分割・長文はファイル"
+            "参照・Agentのpromptは短く）。" % (reason, tool)
         )
     sys.stdout.write(json.dumps({
         "hookSpecificOutput": {
