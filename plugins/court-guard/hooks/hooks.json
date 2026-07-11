@@ -22,6 +22,13 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/leak_detector.py\"" }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",

@@ -64,9 +64,43 @@ def emit(obj):
     sys.stdout.write(json.dumps(obj, ensure_ascii=True))
 
 
+def last_assistant_from_transcript(path):
+    # SubagentStop is not documented to carry last_assistant_message;
+    # fall back to the transcript tail so detection works there too.
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            if size > 400_000:
+                fh.seek(size - 400_000)
+                fh.readline()
+            last = ""
+            for raw in fh:
+                if b'"assistant"' not in raw:
+                    continue
+                try:
+                    entry = json.loads(raw.decode("utf-8", "ignore"))
+                except Exception:
+                    continue
+                if entry.get("type") != "assistant":
+                    continue
+                content = (entry.get("message") or {}).get("content")
+                if isinstance(content, str):
+                    last = content
+                elif isinstance(content, list):
+                    texts = [b.get("text") or "" for b in content
+                             if isinstance(b, dict) and b.get("type") == "text"]
+                    if texts:
+                        last = "\n".join(texts)
+            return last
+    except Exception:
+        return ""
+
+
 def main():
     data = json.loads(sys.stdin.buffer.read().decode("utf-8", "ignore"))
     msg = data.get("last_assistant_message") or ""
+    if not msg and data.get("transcript_path"):
+        msg = last_assistant_from_transcript(data["transcript_path"])
     extra = load_extra()
 
     reason_tpl = (
