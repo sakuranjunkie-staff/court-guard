@@ -32,7 +32,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 ## Configuration (environment variables)
 
-- `COURT_GUARD_ENFORCE` = `1` to make heavy_cmd_guard DENY over-threshold calls instead of advising. The deny reason instructs a concrete split (single-purpose commands / skeleton-plus-small-Edits / reference-style Agent prompts) and explicitly forbids rerouting the body into one long Write. Session-level rationale: advice is a hope, a deny is a guarantee - and the model's own compliant short calls become the in-context examples it imitates. Off by default (advisory).
+- `COURT_GUARD_ENFORCE` = `1` to make heavy_cmd_guard DENY calls whose length is **reducible**: shell commands (splitting into single-purpose calls never mutilates content) and Agent prompts (content can always be passed by file reference). Long `Write`/`Edit` content is **not** denied in a clean session — a new document or code file is irreducible length that must flow through some tool call, and denying it only turns the same tokens into chunked Edits with extra failure modes. Content tools are denied only when the history is already contaminated (re-issuing long writes there is known to re-leak), with a hand-paste / subagent directive. Rationale for deny where it applies: advice is a hope, a deny is a guarantee — and the model's own compliant short calls become the in-context examples it imitates. Off by default (advisory).
 - `COURT_GUARD_MODE` = `retry` (default) or `warn` - auto-retry-once vs user-visible-warning-only (the model never sees a warn).
 - `COURT_GUARD_CMD_MAXLEN` = integer (default `200`) - shell-command length threshold for the advisory.
 - `COURT_GUARD_ARG_MAXLEN` = integer (default `3000`) - Write/Edit/Agent argument length threshold for the advisory.
@@ -49,6 +49,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 | Version | Date | Summary |
 |---|---|---|
+| v0.3.1 | 2026-07-12 | Enforce mode denies only reducible length (commands, Agent prompts). Long Write/Edit content passes with advice in clean sessions — new documents are irreducible — and is denied only under contamination, with a hand-paste/subagent directive |
 | v0.3.0 | 2026-07-12 | Optional enforce mode (`COURT_GUARD_ENFORCE=1`): deny over-threshold calls with concrete split instructions, instead of advising. Contamination escalation folded into both modes |
 | v0.2.2 | 2026-07-12 | Contamination-aware escalation: on a long call in an already-contaminated history, advise routing the chunk to a subagent (short reference-style prompt), hand-pasting file updates, or restarting |
 | v0.2.1 | 2026-07-12 | Leak detection inside subagents: leak_detector registered on SubagentStop, with a transcript-tail fallback where `last_assistant_message` is not provided |

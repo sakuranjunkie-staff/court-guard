@@ -8,13 +8,17 @@ Two modes:
   model to keep following calls short. Rationale: a call that reached this
   hook already parsed - its generation risk is already paid; denying it only
   forces one more generation.
-- enforce (COURT_GUARD_ENFORCE=1): DENY calls over the threshold and instruct
-  a concrete split. Session-level rationale: advice is a hope, a deny is a
-  guarantee - and the model's own compliant short calls then sit in the
-  history as the examples it imitates (the same mimicry that makes leaks
-  multiply, pointed the right way). The deny hint must never route the body
-  into one long Write - that was v0.1's mistake; it prescribes CHUNKED
-  rebuilding only.
+- enforce (COURT_GUARD_ENFORCE=1): DENY calls whose length is REDUCIBLE -
+  shell command chains (splitting never mutilates content) and Agent prompts
+  (reference-passing is always available). Long Write/Edit content is NOT
+  denied in a clean session: new documents/code are irreducible length - they
+  must flow through some tool call, and denying them only turns the same
+  tokens into chunked Edits with extra failure modes. Content tools are
+  denied only when the history is already contaminated, where re-issuing
+  long writes is known to re-leak; there the directive is hand-paste or
+  subagent delegation. Session-level rationale for deny: advice is a hope,
+  a deny is a guarantee - and the model's own compliant short calls become
+  the in-context examples it imitates.
 
 Thresholds: COURT_GUARD_CMD_MAXLEN (default 200, shell commands),
 COURT_GUARD_ARG_MAXLEN (default 3000, content-bearing args).
@@ -148,6 +152,7 @@ def main():
 
     tp = data.get("transcript_path") or ""
     dirty = bool(tp and os.path.isfile(tp) and history_contaminated(tp))
+    content_tool = tool in ("Write", "Edit", "MultiEdit")
     hint = split_hint(tool, cmd_max, arg_max)
     dirty_note = (
         " History is ALREADY contaminated - long calls are likely to leak "
@@ -157,11 +162,21 @@ def main():
         "/ 履歴は汚染済み＝再漏れ濃厚。塊はサブへ（短い参照promptで）、"
         "ファイル更新は手貼りへ、無理なら再起動を勧めろ。" if dirty else "")
 
-    if enforce_on():
+    # Deny only reducible length (commands, Agent prompts). New content in
+    # Write/Edit has nowhere shorter to exist - deny it only when the history
+    # is contaminated and re-issuing long writes is known to re-leak.
+    if enforce_on() and (not content_tool or dirty):
+        if content_tool:
+            hint = (
+                "do NOT re-issue this long write here. Output the full text "
+                "in your reply for the user to hand-paste, or delegate it to "
+                "a subagent with a short reference prompt. "
+                "/ 汚染下で長い書き込みを繰り返すな。全文を地の文で出して"
+                "手貼りしてもらうか、短い参照promptでサブに委ねろ。")
         msg = (
             "court-guard ENFORCE: blocked %s in %s. Long single calls are the "
-            "court-bug trigger; risk attaches to ONE call's length, so split "
-            "the work: %s%s" % (reason, tool, hint, dirty_note))
+            "court-bug trigger; risk attaches to ONE call's length: %s%s"
+            % (reason, tool, hint, dirty_note))
         out = {"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
