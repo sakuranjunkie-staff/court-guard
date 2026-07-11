@@ -49,6 +49,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 | Version | Date | Summary |
 |---|---|---|
+| v0.3.3 | 2026-07-12 | Long shell commands are surfaced regardless of shape: a long single-line one-liner (big jq/find/pipe) now gets an advisory instead of passing silently — an invisible long generation is the exact court-bug failure mode. Enforce follows reducibility: `&&` chains and multiline/heredoc blocks deny; an irreducible single-line one-liner only advises |
 | v0.3.2 | 2026-07-12 | Shape checks (heredoc / COM / inline scripts) now apply only above the length threshold — a 60-char here-string is safe and passes. Risk attaches to length; shape alone never flags |
 | v0.3.1 | 2026-07-12 | Enforce mode denies only reducible length (commands, Agent prompts). Long Write/Edit content passes with advice in clean sessions — new documents are irreducible — and is denied only under contamination, with a hand-paste/subagent directive |
 | v0.3.0 | 2026-07-12 | Optional enforce mode (`COURT_GUARD_ENFORCE=1`): deny over-threshold calls with concrete split instructions, instead of advising. Contamination escalation folded into both modes |

@@ -93,21 +93,28 @@ def arg_len(tool, ti):
 
 
 def shell_reason(cmd, maxlen):
-    # Risk attaches to LENGTH; shape (heredoc/COM/-c) only marks the shapes
-    # that grow long. A short call is safe whatever its shape - never flag it.
+    # Risk attaches to LENGTH: any command over maxlen is surfaced. The second
+    # return value is whether that length is REDUCIBLE (deny-worthy under
+    # enforce) or not. Reducible = splits into one-job-each calls: heredoc,
+    # multiline block, inline script, or an && chain. A long SINGLE-LINE
+    # one-liner (a big jq/find/pipe) is often irreducible, like new content -
+    # so it is surfaced (advisory) but never denied. Short calls are never
+    # flagged, whatever their shape.
     if len(cmd) <= maxlen:
-        return None
+        return None, True
     has_newline = "\n" in cmd
     low = cmd.lower()
     if has_newline and ("<<" in cmd or "@'" in cmd or '@"' in cmd):
-        return "heredoc/here-string (%d chars)" % len(cmd)
+        return "heredoc/here-string (%d chars)" % len(cmd), True
     if "new-object -comobject" in low:
-        return "PowerShell COM (%d chars)" % len(cmd)
+        return "PowerShell COM (%d chars)" % len(cmd), True
     if re.search(r"python[0-9]?\s+-c|-Command\b", cmd):
-        return "long inline script (%d chars)" % len(cmd)
+        return "long inline script (%d chars)" % len(cmd), True
     if has_newline:
-        return "multiline & long (%d chars)" % len(cmd)
-    return None
+        return "multiline & long (%d chars)" % len(cmd), True
+    if "&&" in cmd:
+        return "chained && & long (%d chars)" % len(cmd), True
+    return "long single-line command (%d chars)" % len(cmd), False
 
 
 def split_hint(tool, cmd_max, arg_max):
@@ -142,10 +149,11 @@ def main():
     arg_max = intdef("COURT_GUARD_ARG_MAXLEN", 3000)
 
     reason = None
+    reducible = True  # long shell one-liners set this False -> advisory, not deny
     if tool in ("Bash", "PowerShell"):
         cmd = ti.get("command") or ""
         if isinstance(cmd, str) and cmd:
-            reason = shell_reason(cmd, cmd_max)
+            reason, reducible = shell_reason(cmd, cmd_max)
     else:
         n, field = arg_len(tool, ti)
         if n > arg_max:
@@ -169,7 +177,7 @@ def main():
     # Deny only reducible length (commands, Agent prompts). New content in
     # Write/Edit has nowhere shorter to exist - deny it only when the history
     # is contaminated and re-issuing long writes is known to re-leak.
-    if enforce_on() and (not content_tool or dirty):
+    if enforce_on() and ((not content_tool and reducible) or dirty):
         if content_tool:
             hint = (
                 "do NOT re-issue this long write here. Output the full text "
