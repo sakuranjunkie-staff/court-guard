@@ -93,15 +93,19 @@ def arg_len(tool, ti):
 
 
 def shell_reason(cmd, maxlen):
+    # Risk attaches to LENGTH; shape (heredoc/COM/-c) only marks the shapes
+    # that grow long. A short call is safe whatever its shape - never flag it.
+    if len(cmd) <= maxlen:
+        return None
     has_newline = "\n" in cmd
     low = cmd.lower()
     if has_newline and ("<<" in cmd or "@'" in cmd or '@"' in cmd):
-        return "heredoc/here-string"
+        return "heredoc/here-string (%d chars)" % len(cmd)
     if "new-object -comobject" in low:
-        return "PowerShell COM"
-    if len(cmd) > maxlen and re.search(r"python[0-9]?\s+-c|-Command\b", cmd):
-        return "long inline script"
-    if has_newline and len(cmd) > maxlen:
+        return "PowerShell COM (%d chars)" % len(cmd)
+    if re.search(r"python[0-9]?\s+-c|-Command\b", cmd):
+        return "long inline script (%d chars)" % len(cmd)
+    if has_newline:
         return "multiline & long (%d chars)" % len(cmd)
     return None
 
