@@ -1,5 +1,7 @@
 # court-guard
 
+日本語版: [README.ja.md](README.ja.md)
+
 Mitigation, detection, and recovery for the Claude Code / Opus 4.8 **tool-call corruption bug** (the "court/invoke" leak), where a tool call is emitted as broken tokens: the opening tag corrupts, the call is never executed, and the tool-call XML leaks into the visible reply. Once it leaks, the conversation history is contaminated and the model tends to repeat it. Reported most on Opus 4.8 (1M context) on Windows.
 
 ## This does NOT cure the bug
@@ -8,12 +10,12 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 | It can | It cannot |
 |---|---|
-| Block heavy inline commands before they run (they are a strong trigger) | Prevent the broken token generation itself |
-| Detect leaked tool-call XML at end of turn and warn | Intervene mid-stream while tokens are generated |
-| Optionally auto-retry the turn once (opt-in) | Remove history contamination (the leaked text stays) |
+| Detect leaked tool-call XML at end of turn (main and subagents) and force one clean retry | Prevent the broken token generation itself |
+| Nag the model persistently once the history is contaminated | Intervene mid-stream while tokens are generated |
+| Steer the model away from long tool arguments (the trigger) without blocking the call | Remove history contamination (the leaked text stays) |
 | Flag Write/Edit that did not reach disk (experimental) | Detect Read/Grep "phantom" output (nothing to compare against) |
 
-## What's inside (v0.2)
+## What's inside (v0.2.x)
 
 - **leak_detector** (Stop + SubagentStop): scans the final assistant message for leaked tool-call XML. On SubagentStop, where `last_assistant_message` is not documented, it falls back to reading the transcript tail — so leaks inside subagents are also caught and retried once. Default mode is now `retry`: it blocks the turn once so the model re-issues the call cleanly — the block `reason` is the ONLY channel that actually reaches the model (a `systemMessage` warning is user-visible only, which is why the old `warn` default did nothing for auto-recovery). Fenced/inline code is stripped before matching to avoid false positives. Loop-safe via `stop_hook_active`.
 - **contamination_notice** (UserPromptSubmit, new): if the session transcript already contains leaked tool-call XML, injects a persistent notice into the model's context on every prompt: don't imitate the corrupted text, keep all tool arguments short, recommend restart on recurrence. This targets the imitation loop — the mechanism that makes one leak turn into many.
@@ -42,9 +44,16 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 - The biggest lever is outside any plugin: the bug is reported mostly on **Opus 4.8 with the 1M context tier**. If you can work in the standard 200k tier (`/model claude-opus-4-8`, no `[1m]`), do that and restart sessions liberally — restarting is the only real cure for a contaminated history.
 - Requires `python` on PATH. Windows users: ensure `python` resolves in the shell Claude Code uses.
 
-## Status
+## Changelog
 
-v0.2. Redesign after v0.1 field-tested as ineffective: detection now defaults to `retry` (the only mode the model can act on), the deny-based command guard was replaced with advisory context (denying a successfully-parsed call only forces another long generation), and `contamination_notice` was added to fight the imitation loop. Please report real-world results via issues.
+| Version | Date | Summary |
+|---|---|---|
+| v0.2.2 | 2026-07-12 | Contamination-aware escalation: on a long call in an already-contaminated history, advise routing the chunk to a subagent (short reference-style prompt), hand-pasting file updates, or restarting |
+| v0.2.1 | 2026-07-12 | Leak detection inside subagents: leak_detector registered on SubagentStop, with a transcript-tail fallback where `last_assistant_message` is not provided |
+| v0.2 | 2026-07-12 | Full redesign after v0.1 field-tested as ineffective: detection defaults to `retry` (a warn never reaches the model), deny-based guard replaced with advisory context (denying a parsed call only forces one more long generation), long Write/Edit/Agent arguments watched, `contamination_notice` added against the imitation loop, code fences excluded from matching |
+| v0.1 | 2026-07-11 | Initial release: deny-based heavy_cmd_guard, warn-based leak_detector, write_verify, /court-recover |
+
+Please report real-world results via issues.
 
 ## License
 
