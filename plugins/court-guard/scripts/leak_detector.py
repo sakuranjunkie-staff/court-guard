@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 """Stop hook: detect leaked tool-call XML in the final assistant message
-(the Claude Code "court/invoke" corruption) and warn or auto-retry once.
+(the Claude Code "court/invoke" corruption) and auto-retry once.
 
-Modes (env COURT_GUARD_MODE): 'warn' (default) emits a systemMessage;
-'retry' blocks once so the model re-issues the call cleanly.
+Modes (env COURT_GUARD_MODE): 'retry' (default) blocks once so the model
+re-issues the call cleanly; 'warn' only emits a user-visible systemMessage.
+NOTE: systemMessage is shown to the USER only - the model never sees it.
+Only a block reason reaches the model, which is why 'retry' is the default.
+
+Fenced/inline code is stripped before matching, so legitimately quoting
+tool-call XML inside code blocks does not false-positive.
 Loop-safe via stop_hook_active. Fail-open on any error.
 Extra regex patterns: one per line in $CLAUDE_PLUGIN_DATA/leak_patterns.txt.
 """
@@ -17,6 +22,12 @@ PATTERNS = [
     r'</?\s*antml:function_calls\s*>',
     r'</?\s*function_calls\s*>',
 ]
+
+
+def strip_code(text):
+    # remove fenced blocks and inline code: quoted XML there is not a leak
+    text = re.sub(r"```.*?```", "", text, flags=re.S)
+    return re.sub(r"`[^`\n]*`", "", text)
 
 
 def load_extra():
@@ -36,6 +47,7 @@ def load_extra():
 
 
 def leak_hit(text, extra):
+    text = strip_code(text)
     for pat in PATTERNS + extra:
         try:
             m = re.search(pat, text)
@@ -57,29 +69,31 @@ def main():
     msg = data.get("last_assistant_message") or ""
     extra = load_extra()
 
-    warn = (
-        "court-guard: a tool call may have leaked into the visible text (%s) and did "
-        "NOT run. Re-issue that one call cleanly, exactly once. If it persists, restart "
-        "the session - do NOT /compact. / ツール呼び出しの断片が本文へ漏れ、実行されて"
-        "いない可能性。1回だけクリーンに撃ち直し、直らなければ /compact せず再起動。"
+    reason_tpl = (
+        "court-guard: a tool call leaked into the visible text (%s) and did NOT run. "
+        "Re-issue that one call cleanly, exactly once, keeping its arguments SHORT "
+        "(chunk long edits, pass long content by file reference). If it leaks again, "
+        "stop and tell the user to restart the session - do NOT /compact. "
+        "/ ツール呼び出しが本文へ漏れて未実行。引数を短く保って1回だけ撃ち直せ。"
+        "再発したら撃ち続けず再起動を勧めろ。/compact は禁止。"
     )
 
     # Already forced one continuation -> never block again; warn only if still leaking.
     if data.get("stop_hook_active"):
         if leak_hit(msg, extra):
-            emit({"systemMessage": "court-guard: leak persists after one retry; restart recommended. / 再撃ち後も漏れ継続、再起動推奨。"})
+            emit({"systemMessage": "court-guard: leak persists after one retry; restart the session (do NOT /compact). / 再撃ち後も漏れ継続、/compactせず再起動を。"})
         return
 
     hit = leak_hit(msg, extra)
     if not hit:
         return
 
-    mode = (os.environ.get("COURT_GUARD_MODE") or "warn").lower()
-    reason = warn % hit
-    if mode == "retry":
-        emit({"decision": "block", "reason": reason})
+    mode = (os.environ.get("COURT_GUARD_MODE") or "retry").lower()
+    reason = reason_tpl % hit
+    if mode == "warn":
+        emit({"systemMessage": reason})
         return
-    emit({"systemMessage": reason})
+    emit({"decision": "block", "reason": reason})
 
 
 try:

@@ -1,64 +1,89 @@
 #!/usr/bin/env python
-"""PreToolUse guard: block heavy/complex inline Bash/PowerShell commands.
+"""PreToolUse hook: advise (never deny) when a tool call carries long arguments.
 
-Reduces the frequency of the Claude Code "court"/malformed-tool-call bug,
-whose strongest trigger is heavy inline commands (multiline, heredocs,
-PowerShell COM, long `python -c` bodies). On a match we DENY with a reason
-so the model reroutes the work into a scratchpad script file or a sub-agent.
+v0.2 redesign. A call that reaches PreToolUse has already parsed correctly -
+it did NOT leak. Denying it forces the model to re-generate the same payload
+another way (e.g. a long Write), which is one MORE long generation and one more
+chance to corrupt. So v0.2 lets the call run and injects additionalContext
+steering the model to keep FOLLOWING calls short. The trigger is long arguments
+in any tool (Bash/PowerShell command, Write content, Edit new_string, Agent
+prompt) - not just shell commands.
 
-Threshold configurable via COURT_GUARD_CMD_MAXLEN (default 200).
-Fail-open: any error -> allow (never break the user's workflow).
+Thresholds: COURT_GUARD_CMD_MAXLEN (default 200, shell commands),
+COURT_GUARD_ARG_MAXLEN (default 3000, content-bearing args).
+Fail-open: any error -> silent allow.
 """
 import sys, json, re, os
 
 
-def main():
-    raw = sys.stdin.buffer.read().decode("utf-8", "ignore")
-    data = json.loads(raw)
-    cmd = (data.get("tool_input") or {}).get("command") or ""
-    if not isinstance(cmd, str) or not cmd:
-        return
-
+def intdef(name, default):
     try:
-        maxlen = int(os.environ.get("COURT_GUARD_CMD_MAXLEN") or "200")
-    except ValueError:
-        maxlen = 200
+        return int(os.environ.get(name) or default)
+    except Exception:
+        return default
 
+
+def arg_len(tool, ti):
+    if tool == "Write":
+        return len(ti.get("content") or ""), "content"
+    if tool in ("Edit", "MultiEdit"):
+        edits = ti.get("edits")
+        if isinstance(edits, list):
+            return sum(len((e or {}).get("new_string") or "") for e in edits), "edits"
+        return len(ti.get("new_string") or ""), "new_string"
+    if tool in ("Agent", "Task"):
+        return len(ti.get("prompt") or ""), "prompt"
+    return 0, ""
+
+
+def shell_reason(cmd, maxlen):
     has_newline = "\n" in cmd
-    length = len(cmd)
     low = cmd.lower()
+    if has_newline and ("<<" in cmd or "@'" in cmd or '@"' in cmd):
+        return "heredoc/here-string"
+    if "new-object -comobject" in low:
+        return "PowerShell COM"
+    if len(cmd) > maxlen and re.search(r"python[0-9]?\s+-c|-Command\b", cmd):
+        return "long inline script"
+    if has_newline and len(cmd) > maxlen:
+        return "multiline & long (%d chars)" % len(cmd)
+    return None
+
+
+def main():
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8", "ignore"))
+    tool = data.get("tool_name") or ""
+    ti = data.get("tool_input") or {}
+    cmd_max = intdef("COURT_GUARD_CMD_MAXLEN", 200)
+    arg_max = intdef("COURT_GUARD_ARG_MAXLEN", 3000)
 
     reason = None
-    if has_newline and ("<<" in cmd or "@'" in cmd or '@"' in cmd):
-        reason = "heredoc/here-string"
-    elif "new-object -comobject" in low:
-        reason = "PowerShell COM (New-Object -ComObject)"
-    elif length > maxlen and re.search(r"python[0-9]?\s+-c|-Command\b", cmd):
-        reason = "long inline script (python -c / -Command)"
-    elif has_newline and length > maxlen:
-        reason = "multiline & long (%d chars)" % length
+    if tool in ("Bash", "PowerShell"):
+        cmd = ti.get("command") or ""
+        if isinstance(cmd, str) and cmd:
+            reason = shell_reason(cmd, cmd_max)
+    else:
+        n, field = arg_len(tool, ti)
+        if n > arg_max:
+            reason = "long %s (%d chars)" % (field, n)
 
     if not reason:
-        return
+        return  # silent allow
 
     msg = (
-        "court-guard: heavy inline command detected (%s). This is a strong trigger "
-        "for the tool-call corruption bug. Write it to a .ps1/.py scratchpad file and "
-        "call it with a short command, or hand heavy multi-step work to a sub-agent. "
-        "/ 重いインラインコマンド検知（%s）。スクリプト化して短いコマンドで叩くか、"
-        "重い作業はサブエージェントへ。" % (reason, reason)
+        "court-guard: %s in %s. Long tool arguments are the court-bug trigger. "
+        "This call ran, but keep the NEXT calls short: chunk long edits into "
+        "several small ones, pass long content by file reference instead of "
+        "generating it inline, keep Agent prompts brief. "
+        "/ 長い引数は court バグの引き金。この呼び出しは通したが、以後は短く"
+        "（編集は分割・長文はファイル参照・Agentのpromptは短く）。" % (reason, tool)
     )
-    out = {
+    sys.stdout.write(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": msg,
+            "additionalContext": msg,
         }
-    }
-    # ensure_ascii=True: emit pure-ASCII JSON (\uXXXX) so the Japanese text
-    # survives regardless of the platform stdout encoding (Windows cp932 would
-    # otherwise mojibake it). The harness JSON-parses this back to real chars.
-    sys.stdout.write(json.dumps(out, ensure_ascii=True))
+    }, ensure_ascii=True))
 
 
 try:
