@@ -15,6 +15,48 @@ Fail-open: any error -> silent allow.
 """
 import sys, json, re, os
 
+LEAK_PATTERNS = [
+    r'<\s*antml:invoke\b', r'<\s*invoke\s+name\s*=',
+    r'<\s*antml:parameter\b', r'<\s*parameter\s+name\s*=',
+    r'</?\s*antml:function_calls\s*>', r'</?\s*function_calls\s*>',
+]
+
+
+def history_contaminated(path):
+    # Cheap tail scan, only run when a long-arg call was already detected.
+    # If the main history holds leaked XML, a subagent (clean context) is
+    # strictly safer for chunky work - escalate the advice accordingly.
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            if size > 400_000:
+                fh.seek(size - 400_000)
+                fh.readline()
+            for raw in fh:
+                if b'"assistant"' not in raw:
+                    continue
+                try:
+                    entry = json.loads(raw.decode("utf-8", "ignore"))
+                except Exception:
+                    continue
+                if entry.get("type") != "assistant":
+                    continue
+                content = (entry.get("message") or {}).get("content")
+                texts = []
+                if isinstance(content, str):
+                    texts = [content]
+                elif isinstance(content, list):
+                    texts = [b.get("text") or "" for b in content
+                             if isinstance(b, dict) and b.get("type") == "text"]
+                for t in texts:
+                    t = re.sub(r"```.*?```", "", t, flags=re.S)
+                    t = re.sub(r"`[^`\n]*`", "", t)
+                    if any(re.search(p, t) for p in LEAK_PATTERNS):
+                        return True
+    except Exception:
+        pass
+    return False
+
 
 def intdef(name, default):
     try:
@@ -70,14 +112,28 @@ def main():
     if not reason:
         return  # silent allow
 
-    msg = (
-        "court-guard: %s in %s. Long tool arguments are the court-bug trigger. "
-        "This call ran, but keep the NEXT calls short: chunk long edits into "
-        "several small ones, pass long content by file reference instead of "
-        "generating it inline, keep Agent prompts brief. "
-        "/ 長い引数は court バグの引き金。この呼び出しは通したが、以後は短く"
-        "（編集は分割・長文はファイル参照・Agentのpromptは短く）。" % (reason, tool)
-    )
+    tp = data.get("transcript_path") or ""
+    if tp and os.path.isfile(tp) and history_contaminated(tp):
+        msg = (
+            "court-guard: %s in %s while this history is ALREADY contaminated - "
+            "long calls here are likely to leak again. Escalate now: (1) delegate "
+            "the remaining chunk to a subagent with a SHORT reference-style prompt "
+            "('read file X and do Y') - its context starts clean; (2) for file "
+            "updates, output the text in your reply for the user to hand-paste; "
+            "(3) if neither fits, recommend a session restart. "
+            "/ 汚染済み履歴での長い引数＝再漏れ濃厚。塊ごとサブへ（短い参照prompt"
+            "で・サブの文脈はクリーン）、ファイル更新は手貼りへ、無理なら再起動を"
+            "勧めろ。" % (reason, tool)
+        )
+    else:
+        msg = (
+            "court-guard: %s in %s. Long tool arguments are the court-bug trigger. "
+            "This call ran, but keep the NEXT calls short: chunk long edits into "
+            "several small ones, pass long content by file reference instead of "
+            "generating it inline, keep Agent prompts brief. "
+            "/ 長い引数は court バグの引き金。この呼び出しは通したが、以後は短く"
+            "（編集は分割・長文はファイル参照・Agentのpromptは短く）。" % (reason, tool)
+        )
     sys.stdout.write(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
