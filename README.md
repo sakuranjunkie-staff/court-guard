@@ -32,6 +32,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 ## Configuration (environment variables)
 
+- `COURT_GUARD_ENFORCE` = `1` to make heavy_cmd_guard DENY over-threshold calls instead of advising. The deny reason instructs a concrete split (single-purpose commands / skeleton-plus-small-Edits / reference-style Agent prompts) and explicitly forbids rerouting the body into one long Write. Session-level rationale: advice is a hope, a deny is a guarantee - and the model's own compliant short calls become the in-context examples it imitates. Off by default (advisory).
 - `COURT_GUARD_MODE` = `retry` (default) or `warn` - auto-retry-once vs user-visible-warning-only (the model never sees a warn).
 - `COURT_GUARD_CMD_MAXLEN` = integer (default `200`) - shell-command length threshold for the advisory.
 - `COURT_GUARD_ARG_MAXLEN` = integer (default `3000`) - Write/Edit/Agent argument length threshold for the advisory.
@@ -48,6 +49,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 | Version | Date | Summary |
 |---|---|---|
+| v0.3.0 | 2026-07-12 | Optional enforce mode (`COURT_GUARD_ENFORCE=1`): deny over-threshold calls with concrete split instructions, instead of advising. Contamination escalation folded into both modes |
 | v0.2.2 | 2026-07-12 | Contamination-aware escalation: on a long call in an already-contaminated history, advise routing the chunk to a subagent (short reference-style prompt), hand-pasting file updates, or restarting |
 | v0.2.1 | 2026-07-12 | Leak detection inside subagents: leak_detector registered on SubagentStop, with a transcript-tail fallback where `last_assistant_message` is not provided |
 | v0.2 | 2026-07-12 | Full redesign after v0.1 field-tested as ineffective: detection defaults to `retry` (a warn never reaches the model), deny-based guard replaced with advisory context (denying a parsed call only forces one more long generation), long Write/Edit/Agent arguments watched, `contamination_notice` added against the imitation loop, code fences excluded from matching |

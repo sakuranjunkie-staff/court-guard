@@ -1,13 +1,20 @@
 #!/usr/bin/env python
-"""PreToolUse hook: advise (never deny) when a tool call carries long arguments.
+"""PreToolUse hook: steer the model away from long tool arguments - the
+court-bug trigger. Risk attaches to the length of ONE call (short calls pass
+even in contaminated sessions), so work must be SPLIT, not inlined.
 
-v0.2 redesign. A call that reaches PreToolUse has already parsed correctly -
-it did NOT leak. Denying it forces the model to re-generate the same payload
-another way (e.g. a long Write), which is one MORE long generation and one more
-chance to corrupt. So v0.2 lets the call run and injects additionalContext
-steering the model to keep FOLLOWING calls short. The trigger is long arguments
-in any tool (Bash/PowerShell command, Write content, Edit new_string, Agent
-prompt) - not just shell commands.
+Two modes:
+- advisory (default): let the call run, inject additionalContext telling the
+  model to keep following calls short. Rationale: a call that reached this
+  hook already parsed - its generation risk is already paid; denying it only
+  forces one more generation.
+- enforce (COURT_GUARD_ENFORCE=1): DENY calls over the threshold and instruct
+  a concrete split. Session-level rationale: advice is a hope, a deny is a
+  guarantee - and the model's own compliant short calls then sit in the
+  history as the examples it imitates (the same mimicry that makes leaks
+  multiply, pointed the right way). The deny hint must never route the body
+  into one long Write - that was v0.1's mistake; it prescribes CHUNKED
+  rebuilding only.
 
 Thresholds: COURT_GUARD_CMD_MAXLEN (default 200, shell commands),
 COURT_GUARD_ARG_MAXLEN (default 3000, content-bearing args).
@@ -24,8 +31,6 @@ LEAK_PATTERNS = [
 
 def history_contaminated(path):
     # Cheap tail scan, only run when a long-arg call was already detected.
-    # If the main history holds leaked XML, a subagent (clean context) is
-    # strictly safer for chunky work - escalate the advice accordingly.
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as fh:
@@ -65,6 +70,11 @@ def intdef(name, default):
         return default
 
 
+def enforce_on():
+    return (os.environ.get("COURT_GUARD_ENFORCE") or "").lower() in (
+        "1", "true", "deny", "on", "yes")
+
+
 def arg_len(tool, ti):
     if tool == "Write":
         return len(ti.get("content") or ""), "content"
@@ -92,6 +102,30 @@ def shell_reason(cmd, maxlen):
     return None
 
 
+def split_hint(tool, cmd_max, arg_max):
+    if tool in ("Bash", "PowerShell"):
+        return (
+            "re-issue as single-purpose calls, one job each (aim under %d chars; "
+            "the working directory persists between calls). Do NOT reroute the "
+            "whole body into one long Write - if a script file is needed, build "
+            "it with a short Write plus several small Edits. "
+            "/ 一呼び出し一仕事に割って撃ち直せ（作業ディレクトリは持続する）。"
+            "丸ごと長いWriteへ迂回するな——スクリプトが要るなら短いWrite＋小さな"
+            "Editの積み増しで作れ。" % cmd_max)
+    if tool == "Write":
+        return (
+            "write a short skeleton first, then extend it with several small "
+            "Edits (each well under %d chars). "
+            "/ まず短い骨組みをWriteし、小さなEditを重ねて育てろ。" % arg_max)
+    if tool in ("Edit", "MultiEdit"):
+        return ("split the replacement into several smaller Edits. "
+                "/ 置換を複数の小さなEditに割れ。")
+    return (
+        "shorten the prompt: point at files on disk ('read X, then do Y') "
+        "instead of inlining content. "
+        "/ promptを短くしろ——内容を書き下ろさず「ファイルXを読んでYをやれ」で指せ。")
+
+
 def main():
     data = json.loads(sys.stdin.buffer.read().decode("utf-8", "ignore"))
     tool = data.get("tool_name") or ""
@@ -113,35 +147,36 @@ def main():
         return  # silent allow
 
     tp = data.get("transcript_path") or ""
-    if tp and os.path.isfile(tp) and history_contaminated(tp):
+    dirty = bool(tp and os.path.isfile(tp) and history_contaminated(tp))
+    hint = split_hint(tool, cmd_max, arg_max)
+    dirty_note = (
+        " History is ALREADY contaminated - long calls are likely to leak "
+        "again; prefer delegating the chunk to a subagent (short reference "
+        "prompt - its context starts clean) or hand-pasting file updates; "
+        "if neither fits, recommend a restart. "
+        "/ 履歴は汚染済み＝再漏れ濃厚。塊はサブへ（短い参照promptで）、"
+        "ファイル更新は手貼りへ、無理なら再起動を勧めろ。" if dirty else "")
+
+    if enforce_on():
         msg = (
-            "court-guard: %s in %s while this history is ALREADY contaminated - "
-            "long calls here are likely to leak again. Escalate now: (1) delegate "
-            "the remaining chunk to a subagent with a SHORT reference-style prompt "
-            "('read file X and do Y') - its context starts clean; (2) for file "
-            "updates, output the text in your reply for the user to hand-paste; "
-            "(3) if neither fits, recommend a session restart. "
-            "/ 汚染済み履歴での長い引数＝再漏れ濃厚。塊ごとサブへ（短い参照prompt"
-            "で・サブの文脈はクリーン）、ファイル更新は手貼りへ、無理なら再起動を"
-            "勧めろ。" % (reason, tool)
-        )
+            "court-guard ENFORCE: blocked %s in %s. Long single calls are the "
+            "court-bug trigger; risk attaches to ONE call's length, so split "
+            "the work: %s%s" % (reason, tool, hint, dirty_note))
+        out = {"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": msg,
+        }}
     else:
         msg = (
-            "court-guard: %s in %s. Long tool arguments are the court-bug trigger; "
-            "risk attaches to the length of ONE call, so split work into short calls. "
-            "This call ran, but keep the NEXT calls short: one job per command (no "
-            "long && chains; the working dir persists between calls), chunk long "
-            "edits, pass long content by file reference, keep Agent prompts brief. "
-            "/ 長い引数は court バグの引き金（リスクは1呼び出しの長さに付く）。以後は"
-            "短く割れ（一呼び出し一仕事・長い&&連結禁止・編集は分割・長文はファイル"
-            "参照・Agentのpromptは短く）。" % (reason, tool)
-        )
-    sys.stdout.write(json.dumps({
-        "hookSpecificOutput": {
+            "court-guard: %s in %s. Long tool arguments are the court-bug "
+            "trigger; risk attaches to ONE call's length. This call ran, but "
+            "keep the NEXT calls short - %s%s" % (reason, tool, hint, dirty_note))
+        out = {"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": msg,
-        }
-    }, ensure_ascii=True))
+        }}
+    sys.stdout.write(json.dumps(out, ensure_ascii=True))
 
 
 try:
