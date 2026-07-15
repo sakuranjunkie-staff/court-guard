@@ -95,11 +95,12 @@ def arg_len(tool, ti):
 def shell_reason(cmd, maxlen):
     # Risk attaches to LENGTH: any command over maxlen is surfaced. The second
     # return value is whether that length is REDUCIBLE (deny-worthy under
-    # enforce) or not. Reducible = splits into one-job-each calls: heredoc,
-    # multiline block, inline script, or an && chain. A long SINGLE-LINE
-    # one-liner (a big jq/find/pipe) is often irreducible, like new content -
-    # so it is surfaced (advisory) but never denied. Short calls are never
-    # flagged, whatever their shape.
+    # enforce) or not. Reducible = a block that splits into one-job-each
+    # calls: heredoc, multiline, or an inline script. A long SINGLE-LINE
+    # one-liner (a big jq/find/pipe, or a git commit whose message contains
+    # '&&') is treated as irreducible - surfaced with an advisory but never
+    # denied, because telling an operator '&&' from a literal '&&' inside a
+    # quoted arg needs shell parsing. Short calls are never flagged.
     if len(cmd) <= maxlen:
         return None, True
     has_newline = "\n" in cmd
@@ -112,8 +113,6 @@ def shell_reason(cmd, maxlen):
         return "long inline script (%d chars)" % len(cmd), True
     if has_newline:
         return "multiline & long (%d chars)" % len(cmd), True
-    if "&&" in cmd:
-        return "chained && & long (%d chars)" % len(cmd), True
     return "long single-line command (%d chars)" % len(cmd), False
 
 
