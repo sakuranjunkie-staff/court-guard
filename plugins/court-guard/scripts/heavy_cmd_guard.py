@@ -22,6 +22,9 @@ Two modes:
 
 Thresholds: COURT_GUARD_CMD_MAXLEN (default 200, shell commands),
 COURT_GUARD_ARG_MAXLEN (default 3000, content-bearing args).
+COURT_GUARD_SCRIPTS_HINT (optional): environment-specific text appended to
+the shell split hint - e.g. a pointer to a local script index so the model
+reuses existing scripts instead of rewriting long bodies.
 Fail-open: any error -> silent allow.
 """
 import sys, json, re, os
@@ -125,7 +128,8 @@ def split_hint(tool, cmd_max, arg_max):
             "it with a short Write plus several small Edits. "
             "/ 一呼び出し一仕事に割って撃ち直せ（作業ディレクトリは持続する）。"
             "丸ごと長いWriteへ迂回するな——スクリプトが要るなら短いWrite＋小さな"
-            "Editの積み増しで作れ。" % cmd_max)
+            "Editの積み増しで作れ。" % cmd_max
+            + os.environ.get("COURT_GUARD_SCRIPTS_HINT", ""))
     if tool == "Write":
         return (
             "write a short skeleton first, then extend it with several small "

@@ -36,6 +36,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 - `COURT_GUARD_MODE` = `retry` (default) or `warn` - auto-retry-once vs user-visible-warning-only (the model never sees a warn).
 - `COURT_GUARD_CMD_MAXLEN` = integer (default `200`) - shell-command length threshold for the advisory.
 - `COURT_GUARD_ARG_MAXLEN` = integer (default `3000`) - Write/Edit/Agent argument length threshold for the advisory.
+- `COURT_GUARD_SCRIPTS_HINT` = free text (optional) - appended to the shell split hint on deny/advisory. Point it at your local script index (e.g. "check scripts/README.md first") so the model reuses existing scripts instead of rewriting long bodies.
 - `leak_patterns.txt` in the plugin data dir (`$CLAUDE_PLUGIN_DATA`) - extra regex, one per line, to match how the corruption looks in YOUR logs.
 
 ## Caveats
