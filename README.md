@@ -43,7 +43,8 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 - **False positives:** if a reply legitimately discusses tool-call XML *outside* code fences, `leak_detector`/`contamination_notice` may fire (quoting it inside backticks or fenced blocks is ignored). Worst case in `retry` mode is one spurious extra turn; it never loops.
 - `retry` re-issues the turn once; if the retry also leaks, court-guard stops and recommends a restart. It does not loop.
-- The biggest lever is outside any plugin: the bug is reported mostly on **Opus 4.8 with the 1M context tier**. If you can work in the standard 200k tier (`/model claude-opus-4-8`, no `[1m]`), do that and restart sessions liberally — restarting is the only real cure for a contaminated history.
+- The biggest lever is outside any plugin: the bug is reported **mostly on the Opus family (4.6/4.7/4.8), concentrated on 4.8 in long sessions**. Reports on non-Opus models are so far anecdotal, so treat it as Opus-centric but not provably Opus-only. Dropping to the standard 200k Opus tier (`/model claude-opus-4-8`, no `[1m]`) helps on Opus; restarting is the only real cure for a contaminated history.
+- A structural workaround the community reports as reliable: emit the tool call as the **first element** of the reply, **one call per message**, with any explanation moved **after** the tool result rather than before the call — malformed calls cluster on prose-immediately-before-a-call. Use `/clear` (a fresh session) to reset an already-poisoned history.
 - Requires `python` on PATH. Windows users: ensure `python` resolves in the shell Claude Code uses.
 
 ## Changelog
