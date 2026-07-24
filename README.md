@@ -36,7 +36,7 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 - `COURT_GUARD_MODE` = `retry` (default) or `warn` - auto-retry-once vs user-visible-warning-only (the model never sees a warn).
 - `COURT_GUARD_CMD_MAXLEN` = integer (default `200`) - shell-command length threshold for the advisory.
 - `COURT_GUARD_ARG_MAXLEN` = integer (default `3000`) - Write/Edit/Agent argument length threshold for the advisory.
-- `COURT_GUARD_SCRIPTS_HINT` = free text (optional) - appended to the shell split hint on deny/advisory. Point it at your local script index (e.g. "check scripts/README.md first") so the model reuses existing scripts instead of rewriting long bodies.
+- `COURT_GUARD_SCRIPTS_HINT` = free text (optional) - appended to the shell, Write and Edit split hints on deny/advisory. Point it at your local script index (e.g. "check scripts/README.md first") so the model reuses existing scripts instead of rewriting long bodies.
 - `leak_patterns.txt` in the plugin data dir (`$CLAUDE_PLUGIN_DATA`) - extra regex, one per line, to match how the corruption looks in YOUR logs.
 
 ## Caveats
@@ -50,6 +50,8 @@ The bug happens in the model's own token generation (decoding). A Claude Code pl
 
 | Version | Date | Summary |
 |---|---|---|
+| v0.3.5 | 2026-07-24 | `COURT_GUARD_SCRIPTS_HINT` is now appended to the Write and Edit advisories too, not only shell commands. Writing a fresh long script — the most natural path to reinventing an existing tool — now also surfaces the script-index reminder |
+| v0.3.4 | 2026-07-24 | Optional `COURT_GUARD_SCRIPTS_HINT` env var: free text appended to the heavy_cmd_guard advisory. Point it at a local reusable-script index so the model checks there before rewriting a long body from scratch |
 | v0.3.3 | 2026-07-12 | Long single-line commands are now surfaced with an advisory instead of passing silently — an invisible long generation is the exact court-bug failure mode. Single-line one-liners only advise (an operator `&&` cannot be told from a literal `&&` in a quoted arg without shell parsing, so denying would false-positive on e.g. a commit message); multiline / heredoc / COM / inline-script blocks still deny under enforce |
 | v0.3.2 | 2026-07-12 | Shape checks (heredoc / COM / inline scripts) now apply only above the length threshold — a 60-char here-string is safe and passes. Risk attaches to length; shape alone never flags |
 | v0.3.1 | 2026-07-12 | Enforce mode denies only reducible length (commands, Agent prompts). Long Write/Edit content passes with advice in clean sessions — new documents are irreducible — and is denied only under contamination, with a hand-paste/subagent directive |

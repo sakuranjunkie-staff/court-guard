@@ -134,10 +134,12 @@ def split_hint(tool, cmd_max, arg_max):
         return (
             "write a short skeleton first, then extend it with several small "
             "Edits (each well under %d chars). "
-            "/ まず短い骨組みをWriteし、小さなEditを重ねて育てろ。" % arg_max)
+            "/ まず短い骨組みをWriteし、小さなEditを重ねて育てろ。" % arg_max
+            + os.environ.get("COURT_GUARD_SCRIPTS_HINT", ""))
     if tool in ("Edit", "MultiEdit"):
         return ("split the replacement into several smaller Edits. "
-                "/ 置換を複数の小さなEditに割れ。")
+                "/ 置換を複数の小さなEditに割れ。"
+                + os.environ.get("COURT_GUARD_SCRIPTS_HINT", ""))
     return (
         "shorten the prompt: point at files on disk ('read X, then do Y') "
         "instead of inlining content. "
